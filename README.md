@@ -6,6 +6,8 @@ just builds.
 
 **Why we built it this way — and where Jev wins or loses: [When Jev wins](WHERE-JEV-WINS.md).**
 
+**OpenJEV support:** Jev is built by [TypeSafe](https://typesafe.ai). This fork keeps TypeSafe as the default and adds optional support for [OpenJEV](https://openjev.sh), a free community gateway to the same Jev model — set `OPENJEV_API_KEY` (or `JEV_PROVIDER=openjev`) to use it. Original project: https://github.com/emirbartu/jev-for-all by @emirbartu.
+
 ## What this is
 
 Jev is TypeSafe's System One model, reached through OpenRouter's alpha Decisions API. It is not
@@ -91,6 +93,7 @@ The useful options (defaults shown):
 
 - `apiKey` — OpenRouter key, or set `OPENROUTER_API_KEY`
 - `model` — `~typesafe/jev-latest`
+- `provider` — `undefined` (auto-select). Set `"openjev"` to force OpenJEV, or `"openrouter"` to force OpenRouter. When unset, OpenRouter is used if `OPENROUTER_API_KEY` is set (default unchanged); otherwise OpenJEV is used if `OPENJEV_API_KEY` is set. Env equivalent: `JEV_PROVIDER=openjev`.
 - `timeoutMs` — `2500`, the per-request timeout
 - `skills.enabled` / `skills.gateThreshold` — `true` / `0.3`, skill routing
 - `tools.enabled` / `tools.maxTools` — `true` / `12`, tool-subset routing

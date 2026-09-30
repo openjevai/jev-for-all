@@ -17,11 +17,14 @@ export type Answers = Record<string, unknown>
 
 export type Ask = (input: { state: unknown; questions: Record<string, Question> }) => Promise<Answers>
 
+export type JevProvider = "openrouter" | "openjev"
+
 export interface JevOptions {
   apiKey: string
   model?: string
   serverURL?: string
   timeoutMs?: number
+  provider?: JevProvider
   onMeta?: (meta: { model?: string; inputTokens?: number; outputTokens?: number }) => void
 }
 
@@ -35,7 +38,55 @@ export class JevError extends Error {
   }
 }
 
+// OpenJEV — free community gateway to the same Jev model (https://openjev.sh).
+// Same System One contract as OpenRouter's alpha Decisions API, different endpoint/model/key.
+const OPENJEV_ENDPOINT = "https://api.openjev.sh/v1/systemone"
+
+/** Direct HTTP transport for OpenJEV. Used when provider === "openjev". */
+function createOpenjevAsk(options: JevOptions): Ask {
+  const model = options.model ?? "openjev"
+  const timeoutMs = options.timeoutMs ?? 1000
+  return async ({ state, questions }) => {
+    let response: Response
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      response = await fetch(OPENJEV_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${options.apiKey}`,
+        },
+        body: JSON.stringify({ model, state: state as never, questions }),
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+    } catch (error) {
+      throw new JevError(
+        `jev-for-all request failed: ${error instanceof Error ? error.message : String(error)}`,
+        undefined,
+      )
+    }
+    if (!response.ok) {
+      throw new JevError(`jev-for-all request failed: HTTP ${response.status}`, response.status)
+    }
+    const body = (await response.json()) as Record<string, unknown>
+    const answers = body.answers
+    if (!answers || typeof answers !== "object") throw new JevError("jev-for-all response missing answers")
+    const usage = body.usage as { inputTokens?: unknown; outputTokens?: unknown } | undefined
+    options.onMeta?.({
+      model: typeof body.model === "string" ? body.model : undefined,
+      inputTokens: typeof usage?.inputTokens === "number" ? usage.inputTokens : undefined,
+      outputTokens: typeof usage?.outputTokens === "number" ? usage.outputTokens : undefined,
+    })
+    return answers as Answers
+  }
+}
+
 export function createJev(options: JevOptions): Ask {
+  if (options.provider === "openjev") {
+    return createOpenjevAsk(options)
+  }
   const model = options.model ?? "~typesafe/jev-latest"
   const client = new OpenRouter({ apiKey: options.apiKey })
 

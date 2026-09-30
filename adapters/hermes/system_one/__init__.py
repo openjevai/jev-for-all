@@ -79,7 +79,7 @@ def _handle_turn(ctx, *, session_id: str, user_message: str, model: str = "", pl
                 ),
             )
 
-        jev_model = _setting(ctx, "model") or "~typesafe/jev-latest"
+        jev_model = _setting(ctx, "model")
         timeout_ms = _setting(ctx, "timeout_ms") or 2000
         skill_dirs = _setting(ctx, "skill_dirs") or DEFAULT_SKILL_DIRS
         if isinstance(skill_dirs, str):
@@ -89,9 +89,11 @@ def _handle_turn(ctx, *, session_id: str, user_message: str, model: str = "", pl
         if not skills:
             return None
 
-        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        provider, resolved_key, default_model = decision.resolve_provider()
+        api_key = resolved_key or ""
         if not api_key:
             return None
+        jev_model = jev_model or default_model
 
         calls = _session_budget(ctx, session_id=session_id, hook="pre_llm_call", log_path=log_path)
         if calls is None:
@@ -101,6 +103,15 @@ def _handle_turn(ctx, *, session_id: str, user_message: str, model: str = "", pl
         started = time.time()
 
         def ask(state, questions):
+            if provider == "openjev":
+                return decision.ask_openjev(
+                    state,
+                    questions,
+                    api_key=api_key,
+                    model=jev_model,
+                    timeout_s=timeout_ms / 1000,
+                    on_meta=meta.update,
+                )
             return decision.ask_openrouter(
                 state,
                 questions,
@@ -150,11 +161,13 @@ def _handle_verify(ctx, *, session_id: str, attempt: int, final_response: str, c
         # nudge per turn (agent.max_verify_nudges remains the outer bound, usually 3).
         if attempt != 0:
             return None
-        model = _setting(ctx, "model") or "~typesafe/jev-latest"
+        model = _setting(ctx, "model")
         timeout_ms = _setting(ctx, "timeout_ms") or 2000
-        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        provider, resolved_key, default_model = decision.resolve_provider()
+        api_key = resolved_key or ""
         if not api_key:
             return None
+        model = model or default_model
 
         log_path = _plugin_data_dir() / "decisions.jsonl"
         calls = _session_budget(ctx, session_id=session_id, hook="pre_verify", log_path=log_path)
@@ -165,6 +178,15 @@ def _handle_verify(ctx, *, session_id: str, attempt: int, final_response: str, c
         started = time.time()
 
         def ask(state, questions):
+            if provider == "openjev":
+                return decision.ask_openjev(
+                    state,
+                    questions,
+                    api_key=api_key,
+                    model=model,
+                    timeout_s=timeout_ms / 1000,
+                    on_meta=meta.update,
+                )
             return decision.ask_openrouter(
                 state,
                 questions,

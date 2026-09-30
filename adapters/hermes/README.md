@@ -71,6 +71,8 @@ Capabilities → Plugins form (driven by `plugin.yaml`'s `config_schema`):
 | `observe` | `false` | Append one `usage` line per user message to the decision log. Makes no Jev call. |
 | `skill_dirs` | `[]` → `$HERMES_HOME/skills` | Skill directories to scan. |
 
+**Provider selection (OpenJEV):** TypeSafe/OpenRouter stays the default. To use [OpenJEV](https://openjev.sh) instead, set `JEV_PROVIDER=openjev` and `OPENJEV_API_KEY` in the Hermes process environment. When `JEV_PROVIDER` is unset, OpenRouter is used if `OPENROUTER_API_KEY` is set (unchanged), otherwise OpenJEV is used if only `OPENJEV_API_KEY` is set. The `model` setting defaults to `~typesafe/jev-latest` for OpenRouter and `openjev` for OpenJEV.
+
 ## Decision log
 
 Every Jev call appends one JSON line to `decisions.jsonl` **next to the module** — in a repo

@@ -342,6 +342,67 @@ def ask_openrouter(
     return answers
 
 
+def ask_openjev(
+    state: Any,
+    questions: dict,
+    *,
+    api_key: str,
+    model: str = "openjev",
+    timeout_s: float,
+    on_meta: Callable[[dict], None] | None = None,
+) -> dict:
+    """Direct HTTP transport for OpenJEV (https://openjev.sh).
+
+    Same System One contract as ask_openrouter, different endpoint/model/key.
+    OpenJEV returns 503 when overloaded (retryable alongside 429).
+    """
+    request = urllib.request.Request(
+        "https://api.openjev.sh/v1/systemone",
+        data=json.dumps({"model": model, "state": state, "questions": questions}).encode(),
+        headers={"content-type": "application/json", "authorization": f"Bearer {api_key}"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout_s) as response:
+        body = json.loads(response.read().decode())
+    answers = body.get("answers")
+    if not isinstance(answers, dict):
+        raise RuntimeError("system-one response missing answers")
+    if on_meta is not None:
+        usage = body.get("usage") or {}
+        on_meta(
+            {
+                "model": body.get("model"),
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+            }
+        )
+    return answers
+
+
+def resolve_provider(
+    env: dict[str, str] | None = None,
+) -> tuple[str, str | None, str]:
+    """Return (provider, api_key, model) following the additive selection rule.
+
+    1. JEV_PROVIDER env var wins (openjev / openrouter).
+    2. If OPENROUTER_API_KEY is set -> openrouter (default unchanged).
+    3. If only OPENJEV_API_KEY is set -> openjev.
+    """
+    env = env or os.environ  # type: ignore[assignment]
+    explicit = env.get("JEV_PROVIDER", "")
+    openrouter_key = env.get("OPENROUTER_API_KEY", "")
+    openjev_key = env.get("OPENJEV_API_KEY", "")
+    if explicit == "openjev":
+        return ("openjev", openjev_key, "openjev")
+    if explicit == "openrouter":
+        return ("openrouter", openrouter_key, "~typesafe/jev-latest")
+    if openrouter_key:
+        return ("openrouter", openrouter_key, "~typesafe/jev-latest")
+    if openjev_key:
+        return ("openjev", openjev_key, "openjev")
+    return ("openrouter", None, "~typesafe/jev-latest")
+
+
 def _append_line(path: str | Path, record: dict) -> None:
     """Append one JSONL line to the shared log; a broken log never reaches the caller."""
     try:

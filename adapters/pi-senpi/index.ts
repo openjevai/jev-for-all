@@ -11,7 +11,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { createCache, createWarnOnce, hashKey } from "../../index"
-import { createJev, type Ask } from "../../src/jev"
+import { createJev, type Ask, type JevProvider } from "../../src/jev"
 import { createRecorder, summarize, type Recorder, type UsageSample } from "../../src/observe"
 import { defaultToolRouting, applyToolDecision, renderState, routeTools, type ToolDecision } from "../../src/tools"
 import { decideVerification } from "../../src/verify"
@@ -51,6 +51,7 @@ export interface PiOptions {
   serverURL?: string
   timeoutMs: number
   debug: boolean
+  provider?: JevProvider
   skills: PiSkillRouting
   tools: typeof defaultToolRouting & { enabled: boolean }
   control: { verify: boolean }
@@ -108,6 +109,8 @@ export function readPiOptions(raw: Record<string, unknown> = {}, env: NodeJS.Pro
     serverURL: text(raw.serverURL) ?? text(env.SYSTEM_ONE_SERVER_URL),
     timeoutMs: num(raw.timeoutMs ?? env.SYSTEM_ONE_TIMEOUT_MS, 1000),
     debug: bool(raw.debug ?? env.SYSTEM_ONE_DEBUG, false),
+    provider: (raw.provider === "openjev" || raw.provider === "openrouter") ? raw.provider
+      : (env.JEV_PROVIDER === "openjev" || env.JEV_PROVIDER === "openrouter") ? env.JEV_PROVIDER as JevProvider : undefined,
     skills: { enabled: bool(skills.enabled, true) },
     tools: {
       ...defaultToolRouting,
@@ -258,17 +261,31 @@ export default function jevForPi(pi: PiExtensionAPI): void {
     options = readPiOptions(readPiSettings(agentDir))
     if (options.sessionID) sessionID = options.sessionID
     warnOnce = createWarnOnce("[system-one]")
-    const apiKey = options.apiKey ?? ENV.OPENROUTER_API_KEY
+    // Provider selection: explicit JEV_PROVIDER wins, then OpenRouter if its key is set
+    // (default unchanged), otherwise OpenJEV if only OPENJEV_API_KEY is set.
+    const explicitProvider = options.provider ?? (ENV.JEV_PROVIDER as JevProvider | undefined)
+    const openrouterKey = options.apiKey ?? ENV.OPENROUTER_API_KEY
+    const openjevKey = ENV.OPENJEV_API_KEY
+    let provider: JevProvider
+    let apiKey: string | undefined
+    if (explicitProvider === "openjev") { provider = "openjev"; apiKey = openjevKey }
+    else if (explicitProvider === "openrouter") { provider = "openrouter"; apiKey = openrouterKey }
+    else if (openrouterKey) { provider = "openrouter"; apiKey = openrouterKey }
+    else if (openjevKey) { provider = "openjev"; apiKey = openjevKey }
+    else { provider = "openrouter"; apiKey = undefined }
+
     const routing = options.skills.enabled || options.tools.enabled
     if (apiKey) {
+      const model = provider === "openjev" ? (options.model === "~typesafe/jev-latest" ? "openjev" : options.model) : options.model
       ask = createJev({
         apiKey,
-        model: options.model,
+        model,
+        provider,
         timeoutMs: options.timeoutMs,
         ...(options.serverURL ? { serverURL: options.serverURL } : {}),
       })
     } else if (routing) {
-      console.warn("[system-one] pi routing inert: set settings.json systemOne.apiKey or OPENROUTER_API_KEY")
+      console.warn("[system-one] pi routing inert: set settings.json systemOne.apiKey, OPENROUTER_API_KEY, or OPENJEV_API_KEY")
     }
     log = createDecisionLog(
       options.decisionsFile ?? join(agentDir || ENV.TMPDIR || "/tmp", "system-one", "decisions.jsonl"),

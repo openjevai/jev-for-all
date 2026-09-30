@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { createJev, type Ask } from "../../../src/jev"
+import { createJev, type Ask, type JevProvider } from "../../../src/jev"
 import { policy } from "../../../src/policy"
 import { NONE_CONTEXT, decide, injectionFor } from "../lib/decide"
 import { defaultSkillDirs, scanSkillDirs } from "../lib/roster"
@@ -38,10 +38,23 @@ function agentName(input: HookInput): string {
 }
 
 function newAsk(meta: { model?: string; inputTokens?: number; outputTokens?: number }): Ask | undefined {
-  const apiKey = process.env.OPENROUTER_API_KEY
+  // Provider selection: explicit JEV_PROVIDER wins, then OpenRouter if its key is set
+  // (default unchanged), otherwise OpenJEV if only OPENJEV_API_KEY is set.
+  const explicit = process.env.JEV_PROVIDER as JevProvider | undefined
+  const openrouterKey = process.env.OPENROUTER_API_KEY
+  const openjevKey = process.env.OPENJEV_API_KEY
+  let provider: JevProvider
+  let apiKey: string | undefined
+  if (explicit === "openjev") { provider = "openjev"; apiKey = openjevKey }
+  else if (explicit === "openrouter") { provider = "openrouter"; apiKey = openrouterKey }
+  else if (openrouterKey) { provider = "openrouter"; apiKey = openrouterKey }
+  else if (openjevKey) { provider = "openjev"; apiKey = openjevKey }
+  else { provider = "openrouter"; apiKey = undefined }
+
   if (!apiKey) return undefined
   return createJev({
     apiKey,
+    provider,
     onMeta: (info) => Object.assign(meta, info),
     ...(process.env.SYSTEM_ONE_SERVER_URL ? { serverURL: process.env.SYSTEM_ONE_SERVER_URL } : {}),
   })

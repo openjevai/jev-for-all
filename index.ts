@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { createJev, type Ask } from "./src/jev"
+import { createJev, type Ask, type JevProvider } from "./src/jev"
 import { applySkillDecision, defaultSkillRouting, selectSkill, type SkillRoutingConfig } from "./src/skills"
 import { createRecorder, summarize, type UsageSample } from "./src/observe"
 import { policy } from "./src/policy"
@@ -34,6 +34,7 @@ export interface ResolvedOptions {
   timeoutMs: number
   debug: boolean
   serverURL?: string
+  provider?: JevProvider
   agents?: string[]
   skills: ResolvedSkills
   tools: ResolvedTools
@@ -88,6 +89,7 @@ export function readOptions(raw: Record<string, unknown>): ResolvedOptions {
     timeoutMs: number("timeoutMs", raw.timeoutMs, 2500),
     debug: bool("debug", raw.debug, false),
     serverURL: typeof raw.serverURL === "string" ? raw.serverURL : undefined,
+    provider: raw.provider === "openjev" || raw.provider === "openrouter" ? raw.provider : undefined,
     agents: agents.length > 0 ? agents : undefined,
     skills: {
       enabled: bool("skills.enabled", skills.enabled, true),
@@ -233,10 +235,32 @@ export default Plugin.define({
   id: "jev-for-all",
   async setup(ctx) {
     const options = readOptions((ctx.options ?? {}) as Record<string, unknown>)
-    const apiKey = options.apiKey ?? process.env.OPENROUTER_API_KEY
+    // Provider selection: explicit choice wins, then TypeSafe/OpenRouter if its key is set
+    // (default unchanged), otherwise OpenJEV if only OPENJEV_API_KEY is set.
+    const explicitProvider = options.provider ?? (process.env.JEV_PROVIDER as JevProvider | undefined)
+    const openrouterKey = options.apiKey ?? process.env.OPENROUTER_API_KEY
+    const openjevKey = process.env.OPENJEV_API_KEY
+    let provider: JevProvider
+    let apiKey: string | undefined
+    if (explicitProvider === "openjev") {
+      provider = "openjev"
+      apiKey = openjevKey
+    } else if (explicitProvider === "openrouter") {
+      provider = "openrouter"
+      apiKey = openrouterKey
+    } else if (openrouterKey) {
+      provider = "openrouter"
+      apiKey = openrouterKey
+    } else if (openjevKey) {
+      provider = "openjev"
+      apiKey = openjevKey
+    } else {
+      provider = "openrouter"
+      apiKey = undefined
+    }
     const routing = options.skills.enabled || options.tools.enabled
     if (!apiKey) {
-      if (routing) console.warn("[jev-for-all] routing disabled: set options.apiKey or OPENROUTER_API_KEY")
+      if (routing) console.warn("[jev-for-all] routing disabled: set options.apiKey, OPENROUTER_API_KEY, or OPENJEV_API_KEY")
       // browser_task spawns its own process and reads its own credentials, so it survives a missing key.
       if (!options.observe.enabled && !options.browser.enabled) return
     }
@@ -282,6 +306,7 @@ export default Plugin.define({
         model: options.model,
         timeoutMs: options.timeoutMs,
         serverURL: options.serverURL,
+        provider,
         onMeta: (meta) => recordJev(sessionID, meta),
       })
       const guarded: Ask = async (input) => {
